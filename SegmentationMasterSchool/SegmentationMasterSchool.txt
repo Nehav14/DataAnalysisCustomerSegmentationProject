@@ -1,0 +1,14 @@
+What is the shortest browsing session time resulting in a booking?
+SELECT MIN(session_end - session_start) FROM sessions WHERE trip_id IS NOT NULL;
+
+Assuming a Normal Distribution, how many observations do we expect to be within 2 standard deviations of the mean?
+95%
+
+Rounded to the nearest integer, how many page_clicks are there on average across all browsing sessions rounded?
+select avg(page_clicks) from sessions;
+
+In which case is the MinMax scaling formula equivalent to dividing by the max?
+when the min is 0
+
+Why are there NULL values in the sessions.trip_id field?
+when a browsing session results in a booking, a trip_id is generated, otherwise it is not.

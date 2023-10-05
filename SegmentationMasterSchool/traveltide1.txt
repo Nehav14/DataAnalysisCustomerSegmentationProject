@@ -1,0 +1,246 @@
+--% of flight bookings under discount
+select u.user_id, count(s.session_id) as no_of_sessions, (SUM(case when s.flight_discount then 1 else 0 end)::float/count(*)) as discount_flight_proportions
+from users u
+join sessions s
+on u.user_id = s.user_id
+left join hotels h
+on s.trip_id = h.trip_id
+left join flights f
+on s.trip_id = f.trip_id
+where s.session_start >= '2023-01-04'
+group by u.user_id
+having count(s.session_id) > 7
+order by no_of_sessions desc;
+
+--% of hotel bookings under discount
+select u.user_id, count(s.session_id) as no_of_sessions, (SUM(case when s.hotel_discount then 1 else 0 end)::float/count(*)) as discount_hotel_proportions
+from users u
+join sessions s
+on u.user_id = s.user_id
+left join hotels h
+on s.trip_id = h.trip_id
+left join flights f
+on s.trip_id = f.trip_id
+where s.session_start >= '2023-01-04'
+group by u.user_id
+having count(s.session_id) > 7
+order by no_of_sessions desc;
+
+--average flight discount amount in percentage terms
+select u.user_id, count(s.session_id) as no_of_sessions, avg(s.flight_discount_amount) as average_flight_discount
+from users u
+join sessions s
+on u.user_id = s.user_id
+left join hotels h
+on s.trip_id = h.trip_id
+left join flights f
+on s.trip_id = f.trip_id
+where s.session_start >= '2023-01-04'
+group by u.user_id
+having count(s.session_id) > 7
+order by no_of_sessions desc;
+--range of average flight discount amount in % terms
+with CTE as(select u.user_id, count(s.session_id) as no_of_sessions, avg(s.flight_discount_amount) as average_flight_discount
+from users u
+join sessions s
+on u.user_id = s.user_id
+left join hotels h
+on s.trip_id = h.trip_id
+left join flights f
+on s.trip_id = f.trip_id
+where s.session_start >= '2023-01-04'
+group by u.user_id
+having count(s.session_id) > 7
+order by no_of_sessions desc)
+select round(min(average_flight_discount),2) as min_flight_disc, round(max(average_flight_discount),2) as max_flight_disc
+from CTE;
+
+--average hotel discount amount in percentage terms
+select u.user_id, count(s.session_id) as no_of_sessions, avg(s.hotel_discount_amount) as average_hotel_discount
+from users u
+join sessions s
+on u.user_id = s.user_id
+left join hotels h
+on s.trip_id = h.trip_id
+left join flights f
+on s.trip_id = f.trip_id
+where s.session_start >= '2023-01-04'
+group by u.user_id
+having count(s.session_id) > 7
+order by no_of_sessions desc;
+
+--average hotel discount amount in percentage terms
+with CTE as(select u.user_id, count(s.session_id) as no_of_sessions, avg(s.hotel_discount_amount) as average_hotel_discount
+from users u
+join sessions s
+on u.user_id = s.user_id
+left join hotels h
+on s.trip_id = h.trip_id
+left join flights f
+on s.trip_id = f.trip_id
+where s.session_start >= '2023-01-04'
+group by u.user_id
+having count(s.session_id) > 7
+order by no_of_sessions desc)
+select round(min(average_hotel_discount),2) as min_hotel_disc, round(max(average_hotel_discount),2) as max_hotel_disc
+from CTE;
+
+--bargain hunter with session after '2023-01-04' and session > 7
+with cohort as(
+select s.user_id as users, sum(s.flight_discount_amount * f.base_fare_usd) as ADS, (SUM(case when flight_discount then 1 else 0 end)::float/count(*)) as discount_flight_proportions,
+  avg(flight_discount_amount) as average_flight_discount
+from sessions s
+inner join flights as f
+on f.trip_id = s.trip_id
+where s.trip_id is not null and s.session_start > '2023-01-04'
+group by s.user_id
+having sum(s.flight_discount_amount) is not null and count(s.session_id)>7),
+ADS_table as
+(select users, ADS, ((ADS - min_ADS)/(max_ADS - min_ADS)) as scaled_ADS
+from cohort,
+(select max(ADS) as max_ADS, min(ADS) as min_ADS
+from cohort) as min_max_table)
+select users, (scaled_ADS*discount_flight_proportions*average_flight_discount) as bargain_hunter_index
+from ADS_table join cohort
+using(users);
+
+--which home_country has most of the searches..
+select distinct(home_country), count(session_id) as countsession
+from users
+join sessions
+on users.user_id = sessions.user_id
+where session_start > '2023-01-04'
+group by home_country
+having count(session_id) >= 7
+order by home_country desc;
+
+--calculation for ADS and Scaled ADS where session start after 2023-01-04 scaledADS of hotel_per_room_usd
+with cohort as(
+select s.user_id as users, sum(s.hotel_discount_amount * h.hotel_per_room_usd) as ADS
+from sessions s
+inner join hotels as h
+on h.trip_id = s.trip_id
+where s.trip_id is not null and s.session_start > '2023-01-04'
+group by s.user_id
+having sum(s.hotel_discount_amount) is not null)
+select users, ADS, ((ADS - min_ADS)/(max_ADS - min_ADS)) as scaled_ADS
+from cohort,
+(select max(ADS) as max_ADS, min(ADS) as min_ADS
+from cohort) as min_max_table;
+
+--conversion rate of users
+with CTE as
+(select distinct users.user_id,
+case when (sessions.flight_discount_amount is not null or sessions.hotel_discount_amount is not null) then '1'
+else 0
+end as user_converted
+from users
+left join sessions
+on users.user_id = sessions.user_id
+where sessions.session_start > '2023-01-04'
+group by users.user_id, sessions.flight_discount_amount, sessions.hotel_discount_amount)
+select round(avg(user_converted)*100,2) as conversion_rate
+from CTE;
+
+--average session time per user
+with cohort as(
+select s.user_id as users, avg(extract(epoch from (s.session_end - s.session_start))) as ADS
+from sessions s
+where s.session_start > '2023-01-04'
+group by s.user_id
+having count(s.session_id)>7),
+ADS_table as
+(select users, ADS, ((ADS - min_ADS)/(max_ADS - min_ADS)) as scaled_ADS
+from cohort,
+(select max(ADS) as max_ADS, min(ADS) as min_ADS
+from cohort) as min_max_table)
+select users, scaled_ADS
+from ADS_table join cohort
+using(users);
+
+--average page clicks per users scaled
+with cohort as(
+select s.user_id as users, avg(s.page_clicks) as ADS
+from sessions s
+where s.session_start > '2023-01-04'
+group by s.user_id
+having count(s.session_id)>7),
+ADS_table as
+(select users, ADS, ((ADS - min_ADS)/(max_ADS - min_ADS)) as scaled_ADS
+from cohort,
+(select max(ADS) as max_ADS, min(ADS) as min_ADS
+from cohort) as min_max_table)
+select users, scaled_ADS
+from ADS_table join cohort
+using(users);
+
+--users who have booked the trip
+select distinct(home_country), sessions.user_id, case when(sessions.flight_booked is not null or sessions.hotel_booked) then '1'
+else 0
+end as user_converted
+from users
+join sessions
+on users.user_id = sessions.user_id
+where session_start > '2023-01-04'
+group by home_country, sessions.flight_booked, sessions.hotel_booked, sessions.user_id
+having count(session_id) >= 7
+order by home_country desc;
+
+-- number of users who have cancelled the trip
+select count(sessions.user_id) as no_of_users_per_session, case when(sessions.cancellation) then '1'
+else 0
+end as user_cancelled
+from users
+join sessions
+on users.user_id = sessions.user_id
+where session_start > '2023-01-04'
+group by home_country, sessions.cancellation, sessions.user_id
+having count(session_id) >= 7
+order by no_of_users_per_session;
+
+--users who have booked the trips more frequently
+select count(flights.trip_id) as no_of_trips, sessions.user_id, users.home_country
+from sessions
+left join flights
+on sessions.trip_id = flights.trip_id
+left join users
+on sessions.user_id = users.user_id
+where users.home_country = 'usa' and session_start > '2023-01-04'
+group by sessions.user_id, flights.trip_id,users.home_country
+order by no_of_trips desc
+
+--the users who have booked trip one way
+select users.user_id, sessions.trip_id, case when (flights.return_flight_booked = 'false' ) then '1'
+else 0
+end as one_way_trip_users
+from flights
+join sessions
+on flights.trip_id = sessions.trip_id
+join users
+on sessions.user_id = users.user_id
+where sessions.session_start > '2023-01-04'
+group by users.user_id, sessions.trip_id,flights.return_flight_booked
+
+--users who have booked the round about trip
+select distinct(home_country), sessions.user_id, case when(sessions.flight_booked is not null and sessions.hotel_booked and flights.return_flight_booked) then '1'
+else 0
+end as user_converted
+from users
+join sessions
+on users.user_id = sessions.user_id
+join flights
+on sessions.trip_id = flights.trip_id
+where session_start > '2023-01-04'
+group by home_country, sessions.flight_booked, sessions.hotel_booked, sessions.user_id, flights.return_flight_booked
+--having count(session_id) >= 7
+order by home_country desc;
+
+select min(departure_time), max(departure_time)
+from flights
+join sessions
+on flights.trip_id = sessions.trip_id
+join users
+on sessions.user_id = users.user_id
+where users.home_country = 'usa' 
+
+
